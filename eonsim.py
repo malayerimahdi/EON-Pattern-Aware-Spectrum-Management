@@ -86,8 +86,11 @@ class EONSim:
     def __init__(self, scheme, load, periodic_share=0.0, n_periodic_flows=20, n_requests=20000,
                  warmup=2000, S=320, guard=1, k=3, mean_hold=20.0, fs_min=5, fs_max=20,
                  eps=0.1, lead=0.5, seed=0):
-        assert scheme in ("FF", "FF+PP", "Proposed")
+        assert scheme in ("FF", "FF+PP", "Proposed", "Prop-Zone", "Prop-Hold", "Prop-Zone+Hold")
         self.scheme, self.S, self.guard = scheme, S, guard
+        self.proposed = scheme.startswith("Prop")
+        self.zone = "Zone" in scheme          # detected periodic flows use Last-Fit (top of the band)
+        self.hold = "Hold" in scheme          # keep a periodic flow's spectrum between repeats
         self.rng = np.random.default_rng(seed)
         adj, self.link_id = build_graph()
         self.n_links = len(NSFNET_LINKS)
@@ -124,22 +127,27 @@ class EONSim:
         self.st = dict(req=0, blk=0, bw_req=0, bw_blk=0, req_per=0, blk_per=0, bw_req_per=0, bw_blk_per=0,
                        req_rand=0, blk_rand=0, defrag_calls=0, moves=0, rounds_grouped=0,
                        res_made=0, res_used=0, res_expired=0, res_failed=0, per_after_detect=0,
-                       per_served_by_res=0, frag_samples=[])
+                       per_served_by_res=0, held=0, frag_samples=[])
 
     # ----------------------------------------------------- spectrum helpers
-    def _first_fit(self, links, w):
+    def _first_fit(self, links, w, last=False):
         free = ~np.logical_or.reduce(self.spec[links], axis=0)
         cs = np.concatenate(([0], np.cumsum(free)))
         idx = np.flatnonzero(cs[w:] - cs[:-w] == w)
-        return int(idx[0]) if idx.size else None
+        if not idx.size:
+            return None
+        return int(idx[-1]) if last else int(idx[0])
 
-    def _alloc(self, s, d, b):
+    def _alloc(self, s, d, b, last=False):
         w = b + self.guard
         for links in self.paths[(s, d)]:
-            st = self._first_fit(links, w)
+            st = self._first_fit(links, w, last)
             if st is not None:
                 return links, st, w
         return None
+
+    def _is_high(self, key):
+        return self.zone and key in self.patterns
 
     def _occupy(self, links, start, w, val):
         self.spec[np.ix_(links, range(start, start + w))] = val
@@ -171,7 +179,9 @@ class EONSim:
         contiguous free slots (no hopping over other lightpaths = non-disruptive Push-Pull).
         Returns the moved connection ids."""
         moved = []
-        for cid in sorted(self.conns, key=lambda c: self.conns[c]["start"]):
+        low = [c for c in self.conns if not self.conns[c].get("high")]
+        high = [c for c in self.conns if self.conns[c].get("high")]
+        for cid in sorted(low, key=lambda c: self.conns[c]["start"]):
             c = self.conns[cid]
             links, st, w = c["links"], c["start"], c["width"]
             occ = np.logical_or.reduce(self.spec[links], axis=0)
@@ -179,10 +189,18 @@ class EONSim:
             while new - 1 >= 0 and not occ[new - 1]:
                 new -= 1
             if new < st:
-                self._occupy(links, st, w, False)
-                self._occupy(links, new, w, True)
-                c["start"] = new
-                moved.append(cid)
+                self._occupy(links, st, w, False); self._occupy(links, new, w, True)
+                c["start"] = new; moved.append(cid)
+        for cid in sorted(high, key=lambda c: -self.conns[c]["start"]):
+            c = self.conns[cid]
+            links, st, w = c["links"], c["start"], c["width"]
+            occ = np.logical_or.reduce(self.spec[links], axis=0)
+            new = st
+            while new + w < self.S and not occ[new + w]:
+                new += 1
+            if new > st:
+                self._occupy(links, st, w, False); self._occupy(links, new, w, True)
+                c["start"] = new; moved.append(cid)
         return moved
 
     def _group_rounds(self, moved):
@@ -202,14 +220,14 @@ class EONSim:
             remaining = rest
         return rounds
 
-    def _try_with_defrag(self, s, d, b):
-        r = self._alloc(s, d, b)
-        if r is None and self.scheme in ("FF+PP", "Proposed"):
+    def _try_with_defrag(self, s, d, b, last=False):
+        r = self._alloc(s, d, b, last)
+        if r is None and self.scheme != "FF":
             self.st["defrag_calls"] += 1
             moved = self.push_pull()
             self.st["moves"] += len(moved)
             self.st["rounds_grouped"] += self._group_rounds(moved)
-            r = self._alloc(s, d, b)
+            r = self._alloc(s, d, b, last)
         return r
 
     # ----------------------------------------------------- events
@@ -228,7 +246,7 @@ class EONSim:
         key = (s, d, b)
         served_by_res = False
         r = None
-        if self.scheme == "Proposed" and key in self.reservations:
+        if self.proposed and key in self.reservations:
             rid = self.reservations.pop(key)
             c = self.conns[rid]
             c["reserved"] = False            # reservation becomes the real connection
@@ -238,12 +256,13 @@ class EONSim:
             if count:
                 self.st["res_used"] += 1
         else:
-            r = self._try_with_defrag(s, d, b)
+            hi = self._is_high(key)
+            r = self._try_with_defrag(s, d, b, hi)
             if r is not None:
                 links, st, w = r
                 cid = next(self.cid)
                 self._occupy(links, st, w, True)
-                self.conns[cid] = dict(links=links, start=st, width=w, key=key, reserved=False)
+                self.conns[cid] = dict(links=links, start=st, width=w, key=key, reserved=False, high=hi)
                 self._push(t + self.rng.exponential(self.mean_hold), "dep", cid)
         blocked = (not served_by_res) and r is None
         self.st["req"] += 1
@@ -265,7 +284,7 @@ class EONSim:
                     self.st["blk_rand"] += 1
             if self.st["req"] % 500 == 0:
                 self.st["frag_samples"].append(self.frag_index())
-        if self.scheme == "Proposed":
+        if self.proposed:
             self._detect(t, key)
 
     def _detect(self, t, key):
@@ -286,7 +305,8 @@ class EONSim:
         if key not in self.patterns or key in self.reservations:
             return
         s, d, b = key
-        r = self._try_with_defrag(s, d, b)
+        hi = self._is_high(key)
+        r = self._try_with_defrag(s, d, b, hi)
         count = self.st["req"] >= self.warmup
         if r is None:
             if count:
@@ -295,7 +315,7 @@ class EONSim:
         links, st, w = r
         cid = next(self.cid)
         self._occupy(links, st, w, True)
-        self.conns[cid] = dict(links=links, start=st, width=w, key=key, reserved=True)
+        self.conns[cid] = dict(links=links, start=st, width=w, key=key, reserved=True, high=hi)
         self.reservations[key] = cid
         if count:
             self.st["res_made"] += 1
@@ -320,6 +340,18 @@ class EONSim:
                 self._push(t + T, "arr_per", p)
             elif typ == "dep":
                 if p in self.conns:
+                    c = self.conns[p]
+                    key = c["key"]
+                    if (self.hold and key in self.patterns and key not in self.reservations
+                            and self.history.get(key)):
+                        t_next = self.history[key][-1] + self.patterns[key]
+                        if t_next > t:                       # keep the block for the next repeat
+                            c["reserved"] = True
+                            self.reservations[key] = p
+                            if self.st["req"] >= self.warmup:
+                                self.st["res_made"] += 1; self.st["held"] += 1
+                            self._push(t_next + self.eps + self.lead, "expire", (key, p))
+                            continue
                     self._release(p)
             elif typ == "reserve":
                 self._reserve(t, *p)
@@ -342,7 +374,7 @@ class EONSim:
             frag=float(np.mean(s["frag_samples"])) if s["frag_samples"] else float("nan"),
             defrag_calls=s["defrag_calls"], moves=s["moves"], rounds=s["rounds_grouped"],
             res_made=s["res_made"], res_used=s["res_used"], res_expired=s["res_expired"],
-            res_failed=s["res_failed"],
+            res_failed=s["res_failed"], held=s["held"],
             res_precision=s["res_used"] / s["res_made"] if s["res_made"] else float("nan"),
             res_recall=s["per_served_by_res"] / s["req_per"] if s["req_per"] else float("nan"),
         )
