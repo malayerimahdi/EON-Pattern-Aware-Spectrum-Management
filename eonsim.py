@@ -85,7 +85,7 @@ def k_shortest_paths(adj, s, d, k):
 class EONSim:
     def __init__(self, scheme, load, periodic_share=0.0, n_periodic_flows=20, n_requests=20000,
                  warmup=2000, S=320, guard=1, k=3, mean_hold=20.0, fs_min=5, fs_max=20,
-                 eps=0.1, lead=0.5, seed=0):
+                 eps=0.1, lead=0.5, seed=0, jitter=0.0, hold_budget=1.0):
         assert scheme in ("FF", "FF+PP", "Proposed", "Prop-Zone", "Prop-Hold", "Prop-Zone+Hold")
         self.scheme, self.S, self.guard = scheme, S, guard
         self.proposed = scheme.startswith("Prop")
@@ -104,6 +104,8 @@ class EONSim:
         self.mean_hold, self.fs_min, self.fs_max = mean_hold, fs_min, fs_max
         self.n_requests, self.warmup = n_requests, warmup
         self.eps, self.lead = eps, lead
+        self.jitter = jitter              # std. dev. of periodic arrival-time noise (time units)
+        self.hold_budget = hold_budget    # max share of a link's slots that may sit idle in held/reserved blocks
 
         # traffic: random part + periodic flows carrying `periodic_share` of the offered load (Erlang)
         self.lam_rand = (1 - periodic_share) * load / mean_hold
@@ -237,8 +239,25 @@ class EONSim:
     def _schedule_traffic(self):
         if self.lam_rand > 0:
             self._push(self.rng.exponential(1 / self.lam_rand), "arr_rand", None)
+        self.nominal = {}
         for i, (s, d, b, T) in enumerate(self.flows):
-            self._push(self.rng.uniform(0, T), "arr_per", i)
+            self.nominal[i] = self.rng.uniform(0, T)
+            self._push(self.nominal[i] + self._noise(T), "arr_per", i)
+
+    def _noise(self, T):
+        if self.jitter <= 0:
+            return 0.0
+        return float(np.clip(self.rng.normal(0, self.jitter), -T / 4, T / 4))
+
+    def _idle_ok(self, links, w):
+        """Hold budget: True if keeping w more idle slots on these links stays within the budget."""
+        if self.hold_budget >= 1.0:
+            return True
+        idle = np.zeros(self.n_links)
+        for c in self.conns.values():
+            if c["reserved"]:
+                idle[c["links"]] += c["width"]
+        return bool(np.all(idle[links] + w <= self.hold_budget * self.S))
 
     def _arrival(self, t, s, d, b, periodic):
         n = self.st["req"]
@@ -337,7 +356,8 @@ class EONSim:
             elif typ == "arr_per":
                 s, d, b, T = self.flows[p]
                 self._arrival(t, s, d, b, True)
-                self._push(t + T, "arr_per", p)
+                self.nominal[p] += T
+                self._push(self.nominal[p] + self._noise(T), "arr_per", p)
             elif typ == "dep":
                 if p in self.conns:
                     c = self.conns[p]
@@ -345,7 +365,7 @@ class EONSim:
                     if (self.hold and key in self.patterns and key not in self.reservations
                             and self.history.get(key)):
                         t_next = self.history[key][-1] + self.patterns[key]
-                        if t_next > t:                       # keep the block for the next repeat
+                        if t_next > t and self._idle_ok(c["links"], c["width"]):   # keep the block for the next repeat
                             c["reserved"] = True
                             self.reservations[key] = p
                             if self.st["req"] >= self.warmup:

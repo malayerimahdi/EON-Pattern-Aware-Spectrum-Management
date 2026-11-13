@@ -49,7 +49,7 @@ Route grouping: the routes moved by Push-Pull are grouped with a greedy maximal-
 - **Route grouping** cuts the number of sequential shift operations by **2.5–3.3×**.
 - **Detection** is accurate: precision **1.00** for reservations, recall **0.86–0.92**.
 - **Reservation alone** changes total blocking by −4% to +3% vs FF+PP — **not statistically significant**.
-- **Hold** lowers blocking of periodic flows by **20–36% at 80–120 Erlang**, but raises blocking of the other traffic (+41% to +85%), so total blocking rises.
+- **Hold** lowers blocking of periodic flows by **25–36% at 80–120 Erlang**, but raises blocking of the other traffic (+41% to +85%), so total blocking rises.
 - **Zone** cuts Push-Pull moves by **27–60%**, but raises total blocking (+14% to +147%).
 - **Decision tree** (per-pair demand above threshold in the next window): chance level on the OPNET trace (precision 0.54 = base rate 0.54); precision 0.91–0.97 when 30–50% of the load is periodic.
 
