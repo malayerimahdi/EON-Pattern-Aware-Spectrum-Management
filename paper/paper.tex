@@ -33,7 +33,7 @@ Qom, Iran \\
 \maketitle
 
 \begin{abstract}
-Spectrum fragmentation causes connection requests in elastic optical networks (EONs) to be blocked even when enough total capacity is free. This paper asks whether recognizing recurring traffic patterns can reduce this blocking. We detect periodic flows from the request stream and use them in three ways: advance spectrum reservation, a separate spectrum zone for periodic flows, and holding spectrum between repeats. These are combined with non-disruptive Push-Pull defragmentation, whose shift operations are grouped into parallel rounds with a greedy maximal-independent-set algorithm. Simulations on the 14-node NSFNET topology with 10 independent runs per point show that Push-Pull reduces bandwidth blocking by 31--92\% compared with First-Fit, and route grouping cuts the number of sequential shift operations by 2.5--3.3$\times$. Periodic flows are detected with a precision of 1.00 and a recall of 0.86--0.92. However, advance reservation alone does not change total blocking significantly. Holding spectrum lowers the blocking of periodic flows by 20--36\% at 80--120 Erlang, and the zone policy cuts defragmentation moves by 27--60\%, but both raise the blocking of other traffic. Pattern awareness therefore does not create capacity; it decides which traffic receives it, which is useful for protecting scheduled services.
+Spectrum fragmentation causes connection requests in elastic optical networks (EONs) to be blocked even when enough total capacity is free. This paper asks whether recognizing recurring traffic patterns can reduce this blocking. We detect periodic flows from the request stream and use them in three ways: advance spectrum reservation, a separate spectrum zone for periodic flows, and holding spectrum between repeats. These are combined with non-disruptive Push-Pull defragmentation, whose shift operations are grouped into parallel rounds with a greedy maximal-independent-set algorithm. Simulations on the 14-node NSFNET topology with 10 independent runs per point show that Push-Pull reduces bandwidth blocking by 31--92\% compared with First-Fit, and route grouping cuts the number of sequential shift operations by 2.5--3.3$\times$. Periodic flows are detected with a precision of 1.00 and a recall of 0.86--0.92. No use of the detected patterns lowers total blocking: holding spectrum lowers the blocking of periodic flows by 25--36\% at 80--120 Erlang and the zone policy cuts defragmentation moves by 42--60\%, but both raise the blocking of other traffic. The trade-off can be tuned. Reserving spectrum about one tenth of a period ahead protects periodic flows by 29--44\% with no significant change in total blocking, a better trade-off than holding. A detection tolerance of three times the timing jitter keeps the recall above 0.8. Pattern awareness therefore does not create capacity; it decides which traffic receives it, which is useful for protecting scheduled services.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -52,6 +52,7 @@ This paper tests that idea carefully. Its contributions are:
 \item A periodic-flow detector that runs on the request stream, and three ways to use its output: advance reservation, a separate spectrum zone, and holding spectrum between repeats.
 \item A grouped Push-Pull defragmentation in which routes that share no link are shifted in parallel, using a greedy maximal-independent-set partition \cite{shakya2013}.
 \item An evaluation on NSFNET with 10 seeds per point and 95\% confidence intervals, which shows clearly what pattern awareness can and cannot achieve: it redistributes spectrum between traffic classes but does not lower total blocking.
+\item A study of the knobs that tune this redistribution, namely the reservation lead time, a budget on held spectrum, and the detection tolerance under timing jitter, which identifies advance reservation with a moderate lead as the most efficient way to protect periodic flows.
 \item An open-source simulator with all experiments and results.\footnote{\url{https://github.com/malayerimahdi/EON-Pattern-Aware-Spectrum-Management}}
 \end{itemize}
 
@@ -62,7 +63,7 @@ Section~\ref{sec:related} reviews related work, Section~\ref{sec:model} defines 
 % ===============================================================
 \textit{RSA and defragmentation.} Surveys of RSA in EONs are given in \cite{chatterjee2015,abkenar2017}. Fragmentation-aware RSA chooses spectrum positions that limit small gaps \cite{shen2015,athari2019}. Defragmentation re-arranges active lightpaths \cite{patel2011}; make-before-break and non-disruptive variants limit service interruption \cite{wang2013,zhang2013}. Push-Pull shifts a lightpath to adjacent free spectrum without disrupting its traffic \cite{cugini2013}, and independent sets of routes allow several lightpaths to be defragmented in parallel \cite{shakya2013}.
 
-\textit{Traffic-aware allocation.} Advance reservation, where requests are known before they start, allows better planning of spectrum use \cite{lu2013ar}. Spectrum allocation adapted to estimated traffic fluctuations was studied in \cite{chino2016}, and machine learning has been applied to bandwidth allocation \cite{panayiotou2019} and quality-of-transmission-aware RSA \cite{salani2019}. Unlike these works, we learn which flows recur from the request stream itself and measure, under identical traffic, how each way of using this knowledge affects blocking and defragmentation cost. \todo{Add 3--5 recent (2021--2025) references on ML- or prediction-based defragmentation and spectrum allocation.}
+\textit{Traffic-aware allocation.} Advance reservation, where requests are known before they start, allows better planning of spectrum use \cite{lu2013ar}. Spectrum allocation adapted to estimated traffic fluctuations was studied in \cite{chino2016}, and machine learning has been applied to bandwidth allocation \cite{panayiotou2019} and quality-of-transmission-aware RSA \cite{salani2019}. Learning has recently been applied to defragmentation itself: deep reinforcement learning selects which connections to re-allocate and when \cite{etezadi2022,etezadi2023}, a classifier triggers defragmentation when the predicted blocking rate exceeds a threshold \cite{davalos2023}, and cognitive control loops diagnose and act on degraded network states \cite{trindade2021}. These works learn \emph{when} or \emph{how} to defragment. We instead learn \emph{which demands recur} from the request stream itself, and we measure, under identical traffic, how each way of using this knowledge affects blocking and defragmentation cost.
 
 % ===============================================================
 \section{Network and Traffic Model}\label{sec:model}
@@ -111,6 +112,11 @@ where $T$ is the mean interval and $\varepsilon=0.1$. A key loses its mark as so
 
 \textit{Hold.} When a connection of a periodic key ends and its next repeat is still expected, its block is kept for that repeat instead of being released.
 
+\textit{Hold with a budget.} Held blocks sit idle until the next repeat. To control how much spectrum this costs, a block is held only if, on every link of its route, the slots already idle in held or reserved blocks plus the new block stay within a share $\beta$ of the $S$ slots; otherwise it is released as usual. $\beta=1$ is unrestricted Hold and $\beta\to 0$ is FF+PP.
+
+\subsection{Complexity}
+Detection keeps the last four arrival times per key and costs $O(1)$ per request. A First-Fit search on a path of $\ell$ links costs $O(\ell S)$. One Push-Pull pass over $n$ active lightpaths costs $O(n\,\ell S)$ in the worst case, and the greedy grouping of $m$ moved routes costs $O(m^2\ell)$, which is negligible next to the shift operations it schedules.
+
 \subsection{Per-Pair Demand Prediction}
 We also test whether demand can be predicted per node pair, as proposed in \cite{malayeri2022}. Time is divided into windows; for each pair, a decision tree (depth 5) predicts from the demands of the previous three windows whether the next window's demand will exceed the transmission threshold, defined as the mean demand per pair and window. The first 70\% of windows are used for training and the rest for testing.
 
@@ -140,7 +146,9 @@ Runs per point & 10 seeds, 95\% confidence intervals \\
 \end{tabular}
 \end{table}
 
-We compare First-Fit without defragmentation (FF), FF with grouped Push-Pull (FF+PP), and FF+PP with each use of detected patterns: Reservation, Zone, Hold, and Zone+Hold. We report bandwidth blocking probability (BBP), the request blocking probability of periodic and of random traffic, the number of Push-Pull shifts and parallel rounds, and the precision and recall of detection.
+We compare First-Fit without defragmentation (FF), FF with grouped Push-Pull (FF+PP), and FF+PP with each use of detected patterns: Reservation, Zone, Hold, and Zone+Hold. We report bandwidth blocking probability (BBP), the request blocking probability (BP) of periodic and of random traffic, the number of Push-Pull shifts and parallel rounds, and the precision and recall of detection. Precision is the share of reserved or held blocks that are used; recall is the share of periodic requests served by such a block.
+
+In a second set of experiments at 100 Erlang (period $T\approx13.3$) we vary the reservation lead time $\delta\in\{0.2,1,2,5\}$, the Hold budget $\beta\in\{0.02,0.05,0.1,0.2\}$ (also at 120 Erlang), and add Gaussian jitter with standard deviation $\sigma\in\{0,0.02,0.05,0.1,0.2\}$ to every periodic arrival, clipped to $\pm T/4$, for tolerances $\varepsilon\in\{0.1,0.3\}$. All schemes use the same seeds, so changes relative to FF+PP are also tested with paired 95\% confidence intervals over the 10 seeds; we call a change significant when this interval excludes zero.
 
 % ===============================================================
 \section{Results}\label{sec:results}
@@ -163,7 +171,7 @@ Fig.~\ref{fig:bbp} shows BBP versus load. Push-Pull lowers BBP by 92\% at 50 Erl
 \end{figure}
 
 \subsection{Advance Reservation}
-Reservation detects periodic flows with a precision of 1.00 (every reservation is used) and a recall of 0.92 at 80 Erlang, falling to 0.86 at 120 Erlang as more reservations fail for lack of spectrum. Yet its BBP stays within $-4\%$ and $+3\%$ of FF+PP at every load, inside the confidence intervals (Fig.~\ref{fig:bbp}). The reason is that the block is reserved only $\delta$ before the request arrives: when a block is free at that moment, the request would almost always have found it anyway.
+Reservation detects periodic flows with a precision of 1.00 (every reservation is used) and a recall of 0.92 at 80 Erlang, falling to 0.86 at 120 Erlang as more reservations fail for lack of spectrum. Yet its BBP stays within $-4\%$ and $+3\%$ of FF+PP at every load, inside the confidence intervals (Fig.~\ref{fig:bbp}). The reason is that with $\delta=0.2$ the block is reserved only shortly before the request arrives: when a block is free at that moment, the request would almost always have found it anyway. The paired comparison shows a small but significant benefit for periodic flows ($-13\%$ BP at 100 Erlang), with no change for random traffic.
 
 \subsection{Zone and Hold: A Trade-Off}
 Table~\ref{tab:variants} compares the variants. Hold lowers the blocking of periodic flows by 25\%, 28\%, and 36\% at 80, 100, and 120 Erlang, because their spectrum is never released between repeats. The held blocks, however, are idle until the next repeat, so random traffic is blocked 41--85\% more often and total BBP rises. At loads of 70 Erlang and below, Hold does not help periodic flows at all. Zone reduces Push-Pull shifts by 42--60\% at 80--120 Erlang because the two classes no longer interleave, but it raises total BBP by 14--45\%, since each class can use only part of the band efficiently. Combining both adds their costs. With $\phi=0$ all variants equal FF+PP, as nothing is detected; with $\phi=0.1$ Hold raises BBP from 0.039 to 0.058 at 100 Erlang.
@@ -199,6 +207,28 @@ Load & Scheme & BBP & Periodic BP & Random BP & Shifts \\
 \end{tabular}
 \end{table}
 
+\subsection{Tuning the Trade-Off}
+Fig.~\ref{fig:tradeoff} places each scheme by the blocking it causes to random requests and to periodic requests at 100 Erlang; points further down and to the left are better. Lengthening the reservation lead moves along a much better curve than Hold. With $\delta=1$ (about 7.5\% of the period), periodic BP falls by 29\% while total BBP does not change significantly ($-2\%$); with $\delta=2$ it falls by 44\%, at $+21\%$ random BP and no significant change in BBP ($+3\%$). Only at $\delta=5$ does the idle reserved spectrum raise BBP significantly ($+21\%$). Unrestricted Hold gives smaller protection ($-28\%$) at a much higher cost ($+65\%$ random BP, $+38\%$ BBP), because a held block stays idle for the whole gap between repeats, not just a short lead.
+
+The Hold budget $\beta$ moves Hold between these extremes. At $\beta=0.02$, periodic BP falls significantly, by 12\% at 100 Erlang and 9\% at 120 Erlang, with no significant change in BBP. Larger budgets give more protection at more cost, and at $\beta=0.2$ Hold is almost unrestricted. The curve is not strictly monotone ($\beta=0.05$ at 100 Erlang), which reflects the noise of 10 seeds. Zone and Zone+Hold lie far from both curves: they are a way to reduce defragmentation work, not to protect periodic traffic.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{fig_tradeoff.pdf}
+\caption{Blocking of periodic versus random requests at 100 Erlang (mean of 10 seeds). Curves start at FF+PP ($\beta=0$, no lead) and vary the Hold budget $\beta$ and the reservation lead $\delta$.}
+\label{fig:tradeoff}
+\end{figure}
+
+\subsection{Robustness to Timing Jitter}
+Real scheduled services do not arrive exactly on time. Fig.~\ref{fig:jitter} shows Hold under arrival-time jitter. With $\varepsilon=0.1$, recall falls from 0.91 to 0.65 at $\sigma=0.05$ and to 0.24 at $\sigma=0.1$, and the protection of periodic flows disappears: their BP returns to the FF+PP level. With $\varepsilon=0.3$, recall stays above 0.9 up to $\sigma=0.05$ and is 0.82 at $\sigma=0.1$, while precision stays at 0.89--0.98 up to that point. A tolerance of about three standard deviations of the jitter is therefore needed. In practice, $\varepsilon$ can be set from the observed spread of inter-arrival times of each key.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{fig_jitter.pdf}
+\caption{Hold under arrival-time jitter $\sigma$ at 100 Erlang for two detection tolerances $\varepsilon$: detection recall (left) and blocking of periodic requests (right, 95\% confidence intervals).}
+\label{fig:jitter}
+\end{figure}
+
 \subsection{Predictability of Demand}
 Table~\ref{tab:dt} shows the decision-tree results. When 30--50\% of the load comes from periodic flows, the tree predicts high-demand windows with a precision of 0.91--0.97, but a recall of only 0.27--0.37, because only the pairs that carry periodic flows are predictable. With little or no periodic traffic, the F1-score is near zero. On the OPNET trace used in \cite{malayeri2022}, the precision of 0.54 equals the share of positive windows, i.e., chance level. Re-examining that trace showed why: its offered load is about 5{,}000 Erlang, and the generator wrote the periodic requests to a separate file, so the trace contains no recurring pattern to learn.
 
@@ -221,16 +251,17 @@ OPNET trace of \cite{malayeri2022} & 0.54 & 0.97 & 0.69 \\
 \end{table}
 
 \subsection{Discussion}
-Two lessons follow. First, the large and reliable gains come from defragmentation itself and from running it in parallel rounds. Second, recurring traffic can be detected accurately, but under the same offered load, knowing it does not free spectrum: every use of the patterns that we tested either leaves total blocking unchanged or moves blocking from one traffic class to another. This makes Hold a tool for service differentiation, for example to protect scheduled video services during busy hours, rather than a way to raise total capacity.
+Two lessons follow. First, the large and reliable gains come from defragmentation itself and from running it in parallel rounds. Second, recurring traffic can be detected accurately, but under the same offered load, knowing it does not free spectrum: every use of the patterns that we tested either leaves total blocking unchanged or moves blocking from one traffic class to another. This makes pattern awareness a tool for service differentiation, for example to protect scheduled video services during busy hours, rather than a way to raise total capacity. Third, of the tested mechanisms, advance reservation with a lead of about one tenth of the period gives this protection most cheaply, because it keeps spectrum idle only briefly.
+
+\textit{Limitations.} We use one topology, a single modulation format, and strictly periodic flows with Gaussian jitter. Real traffic may contain daily patterns, flows whose period or bandwidth drifts, and flows that recur at irregular times. The simulator is open, so these cases can be added; testing them on another topology and on measured traffic is the most important next step.
 
 % ===============================================================
 \section{Conclusion}\label{sec:conclusion}
 % ===============================================================
-We studied whether recognizing recurring traffic patterns reduces fragmentation-induced blocking in EONs. Grouped Push-Pull defragmentation lowered blocking by 31--92\% compared with First-Fit and ran about three times faster thanks to independent-set route grouping. Periodic flows were detected with a precision of 1.00 and a recall of about 0.9, but advance reservation did not change total blocking significantly; holding spectrum protected periodic flows (up to 36\% less blocking) and a separate zone reduced defragmentation work (up to 60\% fewer shifts), each at the expense of other traffic. Future work includes policies that switch Hold on only at high load, priority classes for scheduled services, and reinforcement learning to decide when pattern-based actions pay off.
+We studied whether recognizing recurring traffic patterns reduces fragmentation-induced blocking in EONs. Grouped Push-Pull defragmentation lowered blocking by 31--92\% compared with First-Fit and ran about three times faster thanks to independent-set route grouping. Periodic flows were detected with a precision of 1.00 and a recall of about 0.9, but no use of them lowered total blocking. Holding spectrum protected periodic flows (up to 36\% less blocking) and a separate zone reduced defragmentation work (up to 60\% fewer shifts), each at the expense of other traffic. Reserving spectrum about one tenth of a period ahead gave 29--44\% protection without a significant change in total blocking, and a detection tolerance of three times the timing jitter kept the recall above 0.8. Future work includes other topologies and measured traffic, priority classes for scheduled services, and reinforcement learning to decide when pattern-based actions pay off.
 
 \section*{Acknowledgment}
 \todo{Optional.}
-
 
 \begin{thebibliography}{99}
 
@@ -256,7 +287,7 @@ A. Athari Beyragh, A. G. Rahbar, S.-M. Hosseini Ghazvini, and M. Nickray, ``IF-R
 A. N. Patel, P. N. Ji, J. P. Jue, and T. Wang, ``Defragmentation of transparent flexible optical WDM (FWDM) networks,'' in \textit{Proc. OFC/NFOEC}, 2011.
 
 \bibitem{wang2013}
-R. Wang and B. Mukherjee, ``Provisioning in elastic optical networks with non-disruptive defragmentation,'' \textit{J. Lightw. Technol.}, vol.~31, no.~15, pp.~2441--2511, 2013. \todo{verify pages}
+R. Wang and B. Mukherjee, ``Provisioning in elastic optical networks with non-disruptive defragmentation,'' \textit{J. Lightw. Technol.}, vol.~31, no.~15, 2013, doi: 10.1109/JLT.2013.2268535.
 
 \bibitem{zhang2013}
 M. Zhang, W. Shi, L. Gong, W. Lu, and Z. Zhu, ``Bandwidth defragmentation in dynamic elastic optical networks with minimum traffic disruptions,'' in \textit{Proc. IEEE ICC}, 2013.
@@ -282,6 +313,16 @@ M. Salani, C. Rottondi, and M. Tornatore, ``Routing and spectrum assignment inte
 \bibitem{malayeri2022}
 M. M. Malayeri, ``Optimization of fragmented spectrum in elastic optical networks using pattern recognition,'' M.Sc. thesis, Dept. Comput. Eng. IT, Univ. of Qom, Qom, Iran, 2022 (in Persian).
 
-\end{thebibliography}
+\bibitem{trindade2021}
+S. Trindade, R. da S. Torres, Z. Zhu, and N. L. S. da Fonseca, ``Cognitive control-loop for elastic optical networks with space-division multiplexing,'' \textit{Sensors}, vol.~21, no.~23, art.~7821, 2021.
 
-\end{document}
+\bibitem{etezadi2022}
+E. Etezadi, C. Natalino, R. Diaz, A. Lindgren, S. Melin, L. Wosinska, P. Monti, and M. Furdek, ``DeepDefrag: A deep reinforcement learning framework for spectrum defragmentation,'' in \textit{Proc. IEEE GLOBECOM}, 2022, pp.~3694--3699.
+
+\bibitem{etezadi2023}
+E. Etezadi, C. Natalino, R. Diaz, A. Lindgren, S. Melin, L. Wosinska, P. Monti, and M. Furdek, ``Deep reinforcement learning for proactive spectrum defragmentation in elastic optical networks,'' \textit{J. Opt. Commun. Netw.}, vol.~15, no.~10, pp.~E86--E96, 2023.
+
+\bibitem{davalos2023}
+E. D\'avalos, J.-L. Enciso, N. Silva, J. Pinto-R\'ios, and A. Leiva, ``Triggering strategy for defragmentation process in elastic optical networks using machine learning techniques,'' \textit{ICT Express}, vol.~9, no.~5, pp.~890--895, 2023.
+
+\end{thebibliography}\end{document}

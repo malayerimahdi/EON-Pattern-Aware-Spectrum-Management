@@ -53,6 +53,14 @@ Route grouping: the routes moved by Push-Pull are grouped with a greedy maximal-
 - **Zone** cuts Push-Pull moves by **27–60%**, but raises total blocking (+14% to +147%).
 - **Decision tree** (per-pair demand above threshold in the next window): chance level on the OPNET trace (precision 0.54 = base rate 0.54); precision 0.91–0.97 when 30–50% of the load is periodic.
 
+### Tuning the trade-off (Step 7, 100 Erlang, paired 95% CIs over the same seeds)
+
+![Trade-off](figures/fig_tradeoff.png) ![Jitter](figures/fig_jitter.png)
+
+- **Reservation lead time** is the best knob: with lead δ = 1–2 (≈ 7–15% of the period) periodic blocking falls by **29–44%** with **no significant change in total blocking**; δ = 5 raises total blocking by 21%.
+- **Hold with a budget β** (max share of a link's slots idle in held blocks): β = 0.02 lowers periodic blocking by 9–12% at no significant total cost; larger β moves toward unrestricted Hold.
+- **Timing jitter**: with ε = 0.1, recall falls to 0.24 at σ = 0.1 and the benefit disappears; ε = 0.3 keeps recall at 0.82. Rule of thumb: ε ≈ 3σ.
+
 In short: recognizing traffic patterns does not create free capacity here; it decides *who* gets the spectrum. That is useful for protecting scheduled services (e.g., IPTV), at a cost to other traffic.
 
 ## Files
@@ -67,6 +75,9 @@ experiments/04_decision_tree.py        decision-tree demand prediction
 experiments/05_test_zone_hold_variants.py  quick test of zone / hold variants
 experiments/06_run_final.py            final runs, all schemes, 10 seeds
 experiments/07_plots_and_tables.py     figures and summary tables
+experiments/08_sensitivity_and_hold_budget.py  jitter, lead time and Hold budget runs
+experiments/09_plots_sensitivity.py    trade-off and jitter figures
+paper/                                 LaTeX source and PDF of the conference paper
 results/                               raw results (JSON) and summaries
 figures/                               figures used in the paper
 ```
@@ -77,6 +88,8 @@ figures/                               figures used in the paper
 pip install numpy matplotlib scikit-learn
 python experiments/06_run_final.py        # ~30 min on 2 cores
 python experiments/07_plots_and_tables.py
+python experiments/08_sensitivity_and_hold_budget.py   # ~35 min on 2 cores
+python experiments/09_plots_sensitivity.py
 ```
 
 Every run calls `EONSim.check()`, which verifies that the spectrum map matches the active connections and that no lightpaths overlap.
