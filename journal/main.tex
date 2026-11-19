@@ -113,7 +113,7 @@ Fig.~\ref{fig:pipeline} shows how the components fit together. Every request upd
 \node[box, right=0.6cm of b] (c) {Periodic-flow\\detection};
 \node[box, below=0.8cm of c] (d) {Reservation / Zone /\\Hold / Hold-$\beta$};
 \node[box, left=0.6cm of d] (e) {First-Fit RSA\\(Last-Fit in zone)};
-\node[box, left=0.6cm of e] (f) {Grouped\\Push-Pull};
+\node[box, left=1.3cm of e] (f) {Grouped\\Push-Pull};
 \draw[arr] (a)--(b); \draw[arr] (b)--(c); \draw[arr] (c)--(d); \draw[arr] (d)--(e);
 \draw[arr] (e)--node[above, font=\footnotesize]{blocked} (f);
 \draw[arr] (f.south) |- ++(0,-0.45) -| node[pos=0.25, below, font=\footnotesize]{retry} (e.south);
