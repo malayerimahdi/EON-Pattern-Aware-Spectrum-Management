@@ -61,6 +61,16 @@ Route grouping: the routes moved by Push-Pull are grouped with a greedy maximal-
 - **Hold with a budget β** (max share of a link's slots idle in held blocks): β = 0.02 lowers periodic blocking by 9–12% at no significant total cost; larger β moves toward unrestricted Hold.
 - **Timing jitter**: with ε = 0.1, recall falls to 0.24 at σ = 0.1 and the benefit disappears; ε = 0.3 keeps recall at 0.82. Rule of thumb: ε ≈ 3σ.
 
+### Journal version (Step 8): second topology and traffic mix
+
+![BBP on both topologies](figures/j_fig_bbp.png)
+![Trade-off on both topologies](figures/j_fig_tradeoff.png)
+
+- **Germany50** (SNDlib, 50 nodes, 88 links) confirms every finding: Push-Pull −24% to −89% BBP vs FF, grouping 3.3–3.7× fewer sequential steps, detection precision 1.00 / recall 0.91–0.99.
+- **Reservation with lead δ = 1** lowers periodic blocking by 40% on Germany50 and 29–49% on NSFNET (60–120 Erlang) with no significant change in total blocking.
+- **Periodic share φ = 0.1–0.5**: reservation keeps total blocking unchanged at every φ; Hold raises it by 25–48%.
+- The Hold budget does not carry over to Germany50 (no significant protection for β ≤ 0.1).
+
 In short: recognizing traffic patterns does not create free capacity here; it decides *who* gets the spectrum. That is useful for protecting scheduled services (e.g., IPTV), at a cost to other traffic.
 
 ## Files
@@ -77,7 +87,11 @@ experiments/06_run_final.py            final runs, all schemes, 10 seeds
 experiments/07_plots_and_tables.py     figures and summary tables
 experiments/08_sensitivity_and_hold_budget.py  jitter, lead time and Hold budget runs
 experiments/09_plots_sensitivity.py    trade-off and jitter figures
+experiments/10_journal_experiments.py  Germany50, lead on all loads, periodic-share sweep
+experiments/11_plots_journal.py        journal figures and tables
+data/germany50.xml                     SNDlib Germany50 (via optical-rl-gym)
 paper/                                 LaTeX source and PDF of the conference paper
+journal/                               LaTeX source and PDF of the journal manuscript
 results/                               raw results (JSON) and summaries
 figures/                               figures used in the paper
 ```
@@ -90,6 +104,8 @@ python experiments/06_run_final.py        # ~30 min on 2 cores
 python experiments/07_plots_and_tables.py
 python experiments/08_sensitivity_and_hold_budget.py   # ~35 min on 2 cores
 python experiments/09_plots_sensitivity.py
+python experiments/10_journal_experiments.py         # ~40 min on 2 cores
+python experiments/11_plots_journal.py
 ```
 
 Every run calls `EONSim.check()`, which verifies that the spectrum map matches the active connections and that no lightpaths overlap.

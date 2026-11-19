@@ -10,7 +10,7 @@ Traffic follows the OPNET model of the MSc thesis (Poisson arrivals, uniform nod
 uniform FS demand 5-20, exponential holding time with mean 20), plus optional periodic flows
 (fixed node pair and FS demand, constant inter-arrival time) that carry a given share of the load.
 """
-import heapq, itertools, math
+import heapq, itertools, math, os
 import numpy as np
 
 # ---------------------------------------------------------------- topology
@@ -24,14 +24,57 @@ NSFNET_LINKS = [
 N_NODES = 14
 
 
-def build_graph():
-    adj = {n: {} for n in range(N_NODES)}
+
+def load_sndlib(path):
+    """Read an SNDlib XML network; link length = great-circle distance between node coordinates (km)."""
+    import xml.etree.ElementTree as ET
+    ns = {"s": "http://sndlib.zib.de/network"}
+    root = ET.parse(path).getroot()
+    names, xy = [], {}
+    for n in root.find("s:networkStructure/s:nodes", ns):
+        names.append(n.get("id"))
+        xy[n.get("id")] = (float(n.find("s:coordinates/s:x", ns).text), float(n.find("s:coordinates/s:y", ns).text))
+    idx = {n: i + 1 for i, n in enumerate(names)}
+    links, seen = [], set()
+    for l in root.find("s:networkStructure/s:links", ns):
+        a, b = l.find("s:source", ns).text, l.find("s:target", ns).text
+        key = tuple(sorted((a, b)))
+        if key in seen:
+            continue
+        seen.add(key)
+        (lo1, la1), (lo2, la2) = xy[a], xy[b]
+        p1, p2, dl = math.radians(la1), math.radians(la2), math.radians(lo2 - lo1)
+        h = math.sin((p2 - p1) / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+        links.append((idx[a], idx[b], round(2 * 6371 * math.asin(math.sqrt(h)))))
+    return links, len(names)
+
+
+_TOPO_CACHE = {}
+
+
+def get_topology(name):
+    """Return (links, n_nodes). 'nsfnet' = the thesis topology; 'germany50' = SNDlib Germany50."""
+    if name not in _TOPO_CACHE:
+        if name == "nsfnet":
+            _TOPO_CACHE[name] = (NSFNET_LINKS, N_NODES)
+        elif name == "germany50":
+            _TOPO_CACHE[name] = load_sndlib(os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "germany50.xml"))
+        else:
+            raise ValueError(name)
+    return _TOPO_CACHE[name]
+
+
+def build_graph(links=NSFNET_LINKS, n_nodes=N_NODES):
+    adj = {n: {} for n in range(n_nodes)}
     link_id = {}
-    for i, (a, b, L) in enumerate(NSFNET_LINKS):
+    for i, (a, b, L) in enumerate(links):
         a -= 1; b -= 1
         adj[a][b] = L; adj[b][a] = L
         link_id[(a, b)] = i; link_id[(b, a)] = i      # one spectrum resource per (bidirectional) link
     return adj, link_id
+
+
+_PATH_CACHE = {}
 
 
 def k_shortest_paths(adj, s, d, k):
@@ -85,21 +128,25 @@ def k_shortest_paths(adj, s, d, k):
 class EONSim:
     def __init__(self, scheme, load, periodic_share=0.0, n_periodic_flows=20, n_requests=20000,
                  warmup=2000, S=320, guard=1, k=3, mean_hold=20.0, fs_min=5, fs_max=20,
-                 eps=0.1, lead=0.5, seed=0, jitter=0.0, hold_budget=1.0):
+                 eps=0.1, lead=0.5, seed=0, jitter=0.0, hold_budget=1.0, topology="nsfnet"):
         assert scheme in ("FF", "FF+PP", "Proposed", "Prop-Zone", "Prop-Hold", "Prop-Zone+Hold")
         self.scheme, self.S, self.guard = scheme, S, guard
         self.proposed = scheme.startswith("Prop")
         self.zone = "Zone" in scheme          # detected periodic flows use Last-Fit (top of the band)
         self.hold = "Hold" in scheme          # keep a periodic flow's spectrum between repeats
         self.rng = np.random.default_rng(seed)
-        adj, self.link_id = build_graph()
-        self.n_links = len(NSFNET_LINKS)
-        self.paths = {}
-        for s in range(N_NODES):
-            for d in range(N_NODES):
-                if s != d:
-                    ps = k_shortest_paths(adj, s, d, k)
-                    self.paths[(s, d)] = [[self.link_id[(p[i], p[i + 1])] for i in range(len(p) - 1)] for p in ps]
+        links, self.n_nodes = get_topology(topology)
+        adj, self.link_id = build_graph(links, self.n_nodes)
+        self.n_links = len(links)
+        if (topology, k) not in _PATH_CACHE:
+            paths = {}
+            for s in range(self.n_nodes):
+                for d in range(self.n_nodes):
+                    if s != d:
+                        ps = k_shortest_paths(adj, s, d, k)
+                        paths[(s, d)] = [[self.link_id[(p[i], p[i + 1])] for i in range(len(p) - 1)] for p in ps]
+            _PATH_CACHE[(topology, k)] = paths
+        self.paths = _PATH_CACHE[(topology, k)]
         self.spec = np.zeros((self.n_links, S), dtype=bool)        # True = occupied
         self.mean_hold, self.fs_min, self.fs_max = mean_hold, fs_min, fs_max
         self.n_requests, self.warmup = n_requests, warmup
@@ -113,7 +160,7 @@ class EONSim:
         if periodic_share > 0:
             per_flow_rate = periodic_share * load / mean_hold / n_periodic_flows
             for _ in range(n_periodic_flows):
-                s, d = self.rng.choice(N_NODES, 2, replace=False)
+                s, d = self.rng.choice(self.n_nodes, 2, replace=False)
                 b = int(self.rng.integers(fs_min, fs_max + 1))
                 self.flows.append((int(s), int(d), b, 1.0 / per_flow_rate))
 
@@ -349,7 +396,7 @@ class EONSim:
         while self.st["req"] < self.n_requests + self.warmup:
             t, _, typ, p = heapq.heappop(self.events)
             if typ == "arr_rand":
-                s, d = self.rng.choice(N_NODES, 2, replace=False)
+                s, d = self.rng.choice(self.n_nodes, 2, replace=False)
                 b = int(self.rng.integers(self.fs_min, self.fs_max + 1))
                 self._arrival(t, int(s), int(d), b, False)
                 self._push(t + self.rng.exponential(1 / self.lam_rand), "arr_rand", None)

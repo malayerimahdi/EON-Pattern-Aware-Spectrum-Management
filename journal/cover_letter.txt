@@ -1,0 +1,20 @@
+Dear Editor,
+
+Please find enclosed our manuscript "Does Knowing the Traffic Pattern Help? Periodic-Flow Detection, Spectrum Reservation and Grouped Push-Pull Defragmentation in Elastic Optical Networks", which we submit for consideration as a research article in Optical Switching and Networking.
+
+Scheduled services such as IPTV repeat between the same node pairs, and several works suggest using such regularity to allocate spectrum better in elastic optical networks. Our study tests this idea in a controlled experiment. We detect periodic flows from the request stream without training and compare four ways to use them (advance reservation, a separate spectrum zone, holding spectrum between repeats, and holding with a budget), all combined with non-disruptive Push-Pull defragmentation whose shifts are grouped into parallel rounds.
+
+The main findings, obtained on NSFNET and Germany50 with paired statistical tests, are:
+- Push-Pull lowers bandwidth blocking by 24-92% compared with First-Fit, and route grouping makes it 2.5-3.7 times faster.
+- Periodic flows are detected with a precision of 1.00 and a recall of 0.86-0.99, but no use of them lowers total blocking; pattern knowledge decides which traffic receives the spectrum.
+- Reserving spectrum about one tenth of a period ahead lowers the blocking of periodic flows by 29-49% without a significant change in total blocking, on both topologies and for periodic shares of 10-50%.
+
+We believe these results fit the scope of Optical Switching and Networking, which includes elastic optical networks and spectrum management. The simulator, all experiment scripts and raw results are openly available, so every result can be reproduced.
+
+[If a conference version is submitted or published (e.g., ONDM 2027), state it here and explain how this manuscript extends it.]
+
+This manuscript has not been published and is not under consideration elsewhere. All authors have approved the manuscript and agree with its submission.
+
+Sincerely,
+Mohammad Mahdi Malayeri and Mohsen Nickray
+Department of Computer Engineering and Information Technology, University of Qom, Qom, Iran
